@@ -1,6 +1,6 @@
 {
   "name": "inspiredu-music-studio",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "vite",
@@ -8,8 +8,7 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
-    "@soundtouchjs/audio-worklet": "^1.0.0",
-    "@soundtouchjs/core": "^1.0.0"
+    "@soundtouchjs/audio-worklet": "^2.1.1"
   },
   "devDependencies": {
     "vite": "^7.1.0",
