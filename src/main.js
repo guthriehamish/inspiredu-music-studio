@@ -42,6 +42,7 @@ app.innerHTML = `
 
     <button id="transpose" disabled>Transpose G → D</button>
     <button id="download" class="secondary" disabled>Download transposed WAV</button>
+    <p id="qualityNote" class="quality-note hidden">Quality check: compare the opening, drums, bass and sustained instruments against the original. If you hear warbling, flutter, metallic smearing or timing drift, stop here and report it — we will change the processing engine before adding more features.</p>
   </section>
 
   <footer>Your audio stays in your browser. It is not uploaded to InspirEdu or Cloudflare.</footer>
@@ -57,6 +58,7 @@ const duration = document.querySelector("#duration");
 const processedDuration = document.querySelector("#processedDuration");
 const transpose = document.querySelector("#transpose");
 const download = document.querySelector("#download");
+const qualityNote = document.querySelector("#qualityNote");
 
 let sourceUrl = null;
 let processedUrl = null;
@@ -76,6 +78,7 @@ fileInput.addEventListener("change", async () => {
   transpose.disabled = true;
   download.disabled = true;
   renderedBuffer = null;
+  qualityNote.classList.add("hidden");
   processed.removeAttribute("src");
   processedDuration.textContent = "—";
   if (sourceUrl) URL.revokeObjectURL(sourceUrl);
@@ -127,6 +130,7 @@ transpose.addEventListener("click", async () => {
       ? "Done. Pitch −5 semitones; tempo 100%; duration preserved."
       : `Done, but duration differs by ${delta.toFixed(2)}s — flag this before we proceed.`;
     download.disabled = false;
+    qualityNote.classList.remove("hidden");
   } catch (err) {
     console.error(err);
     status.textContent = `Transpose failed: ${err?.message || "unknown audio processing error"}`;
