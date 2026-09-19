@@ -1,5 +1,6 @@
 import "./style.css";
-import { SoundTouch } from "@soundtouchjs/core";
+import { processOffline } from "@soundtouchjs/audio-worklet";
+import processorUrl from "@soundtouchjs/audio-worklet/processor?url";
 
 const app = document.querySelector("#app");
 app.innerHTML = `
@@ -7,7 +8,7 @@ app.innerHTML = `
   <header>
     <p class="eyebrow">InspirEdu • Music Studio</p>
     <h1>G → D Transpose Test</h1>
-    <p class="lede">First milestone: keep the instrumental at its original speed and shift it down exactly five semitones.</p>
+    <p class="lede">Keep the instrumental at its original speed and shift it down exactly five semitones.</p>
   </header>
 
   <section class="card">
@@ -20,6 +21,7 @@ app.innerHTML = `
     <div id="details" class="details hidden">
       <div><span>File</span><strong id="filename">—</strong></div>
       <div><span>Original duration</span><strong id="duration">—</strong></div>
+      <div><span>Processed duration</span><strong id="processedDuration">—</strong></div>
       <div><span>Speed</span><strong>100%</strong></div>
       <div><span>Pitch</span><strong>−5 semitones</strong></div>
       <div><span>Key</span><strong>G → D</strong></div>
@@ -34,15 +36,15 @@ app.innerHTML = `
       </div>
       <div>
         <h2>Transposed preview</h2>
-        <p class="note">The production render engine is being wired in next. This build first verifies deployment, decoding and exact source duration without altering your original file.</p>
         <audio id="processed" controls></audio>
       </div>
     </div>
 
     <button id="transpose" disabled>Transpose G → D</button>
+    <button id="download" class="secondary" disabled>Download transposed WAV</button>
   </section>
 
-  <footer>No audio is uploaded. Processing is designed to happen locally in your browser.</footer>
+  <footer>Your audio stays in your browser. It is not uploaded to InspirEdu or Cloudflare.</footer>
 </section>`;
 
 const fileInput = document.querySelector("#file");
@@ -52,9 +54,14 @@ const status = document.querySelector("#status");
 const details = document.querySelector("#details");
 const filename = document.querySelector("#filename");
 const duration = document.querySelector("#duration");
+const processedDuration = document.querySelector("#processedDuration");
 const transpose = document.querySelector("#transpose");
-let objectUrl = null;
+const download = document.querySelector("#download");
+
+let sourceUrl = null;
+let processedUrl = null;
 let audioBuffer = null;
+let renderedBuffer = null;
 
 const formatTime = seconds => {
   if (!Number.isFinite(seconds)) return "—";
@@ -67,10 +74,14 @@ fileInput.addEventListener("change", async () => {
   const file = fileInput.files?.[0];
   if (!file) return;
   transpose.disabled = true;
+  download.disabled = true;
+  renderedBuffer = null;
   processed.removeAttribute("src");
-  if (objectUrl) URL.revokeObjectURL(objectUrl);
-  objectUrl = URL.createObjectURL(file);
-  original.src = objectUrl;
+  processedDuration.textContent = "—";
+  if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+  if (processedUrl) URL.revokeObjectURL(processedUrl);
+  sourceUrl = URL.createObjectURL(file);
+  original.src = sourceUrl;
   filename.textContent = file.name;
   status.textContent = "Decoding audio locally…";
   try {
@@ -83,15 +94,90 @@ fileInput.addEventListener("change", async () => {
     transpose.disabled = false;
     status.textContent = "Loaded. Source speed is locked at 100%; target pitch is −5 semitones.";
   } catch (err) {
+    console.error(err);
     audioBuffer = null;
     status.textContent = "This browser could not decode that audio file. Try WAV or MP3.";
   }
 });
 
-transpose.addEventListener("click", () => {
+transpose.addEventListener("click", async () => {
   if (!audioBuffer) return;
-  const probe = new SoundTouch(audioBuffer.sampleRate);
-  probe.pitchSemitones = -5;
-  probe.tempo = 1;
-  status.textContent = "Audio engine loaded successfully. High-quality offline render is the next processing step; no destructive fallback will be used.";
+  transpose.disabled = true;
+  download.disabled = true;
+  status.textContent = "Transposing down 5 semitones at 100% tempo…";
+  try {
+    renderedBuffer = await processOffline({
+      input: audioBuffer,
+      processorUrl,
+      pitchSemitones: -5,
+      playbackRate: 1,
+      stretchParameters: {
+        quickSeek: false,
+        overlapMs: 12
+      }
+    });
+    const wav = audioBufferToWav(renderedBuffer);
+    const blob = new Blob([wav], { type: "audio/wav" });
+    if (processedUrl) URL.revokeObjectURL(processedUrl);
+    processedUrl = URL.createObjectURL(blob);
+    processed.src = processedUrl;
+    processedDuration.textContent = formatTime(renderedBuffer.duration);
+    const delta = Math.abs(renderedBuffer.duration - audioBuffer.duration);
+    status.textContent = delta < 0.05
+      ? "Done. Pitch −5 semitones; tempo 100%; duration preserved."
+      : `Done, but duration differs by ${delta.toFixed(2)}s — flag this before we proceed.`;
+    download.disabled = false;
+  } catch (err) {
+    console.error(err);
+    status.textContent = `Transpose failed: ${err?.message || "unknown audio processing error"}`;
+  } finally {
+    transpose.disabled = false;
+  }
 });
+
+download.addEventListener("click", () => {
+  if (!processedUrl) return;
+  const a = document.createElement("a");
+  a.href = processedUrl;
+  a.download = "inspiredu-G-to-D-minus-5-semitones.wav";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+});
+
+function audioBufferToWav(buffer) {
+  const channels = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const frames = buffer.length;
+  const bytesPerSample = 2;
+  const blockAlign = channels * bytesPerSample;
+  const dataSize = frames * blockAlign;
+  const out = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(out);
+  const write = (offset, text) => {
+    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+  write(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  write(8, "WAVE");
+  write(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true);
+  write(36, "data");
+  view.setUint32(40, dataSize, true);
+  const channelData = Array.from({ length: channels }, (_, c) => buffer.getChannelData(c));
+  let offset = 44;
+  for (let i = 0; i < frames; i++) {
+    for (let c = 0; c < channels; c++) {
+      const sample = Math.max(-1, Math.min(1, channelData[c][i]));
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+      offset += 2;
+    }
+  }
+  return out;
+}
