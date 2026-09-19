@@ -1,5 +1,7 @@
 # InspirEdu Music Studio
 
+> Cloudflare Git integration reconnected — automatic deployment check.
+
 Browser-based music practice-track processor.
 
 ## V0.2 audio acceptance build
